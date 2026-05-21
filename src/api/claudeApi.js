@@ -1,14 +1,20 @@
-const PROXY = '/.netlify/functions/claude-proxy'
+import Anthropic from '@anthropic-ai/sdk'
+
+function getClient() {
+  const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY
+  if (!apiKey) throw new Error('VITE_ANTHROPIC_API_KEY is not set')
+  return new Anthropic({ apiKey, dangerouslyAllowBrowser: true })
+}
 
 async function callClaude(system, messages) {
-  const res = await fetch(PROXY, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ system, messages }),
+  const client = getClient()
+  const response = await client.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 1024,
+    system,
+    messages,
   })
-  if (!res.ok) throw new Error(`Claude proxy error: ${res.status}`)
-  const data = await res.json()
-  return data.content
+  return response.content[0].text
 }
 
 function parseJsonFromContent(content) {

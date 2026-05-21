@@ -1,6 +1,20 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { isToday, isSameDay } from '../utils/dateUtils'
 import { getTotalCalories, getTotalProtein, getTotalCarbs, getTotalFat } from '../utils/foodUtils'
+
+const HEALTH_ENDPOINT = '/.netlify/functions/health-sync'
+const HEALTH_CACHE_KEY = 'healthSyncCache'
+
+function loadCachedActiveCalories() {
+  try {
+    const raw = localStorage.getItem(HEALTH_CACHE_KEY)
+    if (!raw) return 0
+    const parsed = JSON.parse(raw)
+    return typeof parsed.activeCalories === 'number' ? parsed.activeCalories : 0
+  } catch {
+    return 0
+  }
+}
 
 function load() {
   try {
@@ -17,6 +31,24 @@ function persist(items) {
 
 export function useDailyLog() {
   const [foodItems, setFoodItems] = useState(load)
+  const [activeCaloriesFromHealth, setActiveCaloriesFromHealth] = useState(loadCachedActiveCalories)
+
+  // Fetch latest HealthKit data once on mount; update the net-calorie offset
+  useEffect(() => {
+    fetch(HEALTH_ENDPOINT)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json) => {
+        const cal = json?.data?.activeCalories
+        if (typeof cal === 'number') {
+          setActiveCaloriesFromHealth(cal)
+          // Cache full record so HealthKitPlaceholder and other consumers have it
+          try {
+            localStorage.setItem(HEALTH_CACHE_KEY, JSON.stringify(json.data))
+          } catch {}
+        }
+      })
+      .catch(() => {}) // silent — app works fine without HealthKit data
+  }, [])
 
   const _set = useCallback((updater) => {
     setFoodItems((prev) => {
@@ -73,6 +105,9 @@ export function useDailyLog() {
   const totalFatToday = todayItems.reduce((s, i) => s + getTotalFat(i), 0)
   const totalWaterToday = todayItems.reduce((s, i) => s + (i.waterOz || 0), 0)
 
+  // Net calories = logged food/exercise − HealthKit active calories (0 when no sync yet)
+  const netCaloriesToday = totalCaloriesToday - activeCaloriesFromHealth
+
   const itemsForDate = useCallback(
     (date) => foodItems.filter((item) => isSameDay(item.date, date)),
     [foodItems]
@@ -82,6 +117,8 @@ export function useDailyLog() {
     foodItems,
     todayItems,
     totalCaloriesToday,
+    netCaloriesToday,
+    activeCaloriesFromHealth,
     totalProteinToday,
     totalCarbsToday,
     totalFatToday,
